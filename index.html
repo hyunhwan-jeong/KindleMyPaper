@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KindleMyPaper - Convert Academic Papers to Kindle Format</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>📚 KindleMyPaper</h1>
+        <p>Convert Academic Papers (PDF) to Kindle-friendly EPUB format</p>
+    </header>
+
+    <main>
+        <div class="container">
+            <!-- Step 1: Upload PDF -->
+            <section id="upload-section" class="step active">
+                <h2>Step 1: Upload PDF</h2>
+                <div class="upload-area" id="upload-area">
+                    <div class="upload-icon">📄</div>
+                    <p>Drag and drop your PDF file here or click to browse</p>
+                    <input type="file" id="pdf-input" accept=".pdf" hidden>
+                    <button class="btn btn-primary" onclick="document.getElementById('pdf-input').click()">
+                        Choose PDF File
+                    </button>
+                </div>
+                <div id="file-info" class="file-info hidden"></div>
+                <button id="convert-btn" class="btn btn-success hidden">Convert to Markdown</button>
+            </section>
+
+            <!-- Step 2: Edit Markdown -->
+            <section id="edit-section" class="step hidden">
+                <h2>Step 2: Edit Markdown</h2>
+                <div class="editor-controls">
+                    <button id="apply-prompt-btn" class="btn btn-secondary">Apply Custom Treatment</button>
+                    <button id="preview-btn" class="btn btn-secondary">Preview</button>
+                </div>
+                <div class="editor-container">
+                    <textarea id="markdown-editor" placeholder="Converted markdown will appear here..."></textarea>
+                </div>
+                <button id="generate-epub-btn" class="btn btn-success">Generate EPUB</button>
+            </section>
+
+            <!-- Step 3: Download EPUB -->
+            <section id="download-section" class="step hidden">
+                <h2>Step 3: Download EPUB</h2>
+                <div class="download-area">
+                    <div class="success-icon">✅</div>
+                    <p>Your EPUB file is ready!</p>
+                    <button id="download-btn" class="btn btn-primary">Download EPUB</button>
+                    <button id="restart-btn" class="btn btn-secondary">Convert Another Paper</button>
+                </div>
+            </section>
+
+            <!-- Loading overlay -->
+            <div id="loading-overlay" class="loading-overlay hidden">
+                <div class="loading-spinner"></div>
+                <p id="loading-text">Processing...</p>
+            </div>
+        </div>
+    </main>
+
+    <footer>
+        <p>Made with ❤️ for academic readers | 
+           <a href="https://github.com/datalab-to/marker" target="_blank">Powered by Marker</a>
+        </p>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
