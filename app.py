@@ -9,6 +9,7 @@ import shutil
 import subprocess
 from pathlib import Path
 import json
+import time
 from typing import Optional
 
 # For AI treatment (optional)
@@ -41,7 +42,10 @@ app.add_middleware(
 )
 
 # Serve static files
-app.mount("/static", StaticFiles(directory="."), name="static")
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Serve temporary images
+app.mount("/temp_images", StaticFiles(directory="temp_images"), name="temp_images")
 
 # Pydantic models
 class TreatmentRequest(BaseModel):
@@ -69,6 +73,9 @@ async def upload_pdf(pdf: UploadFile = File(...)):
     """Step 1: Upload PDF file"""
     if pdf.content_type != "application/pdf":
         raise HTTPException(status_code=400, detail="File must be a PDF")
+    
+    # Clean up old temp images
+    cleanup_old_temp_images()
     
     # Create temporary file
     temp_dir = tempfile.mkdtemp()
@@ -137,12 +144,19 @@ async def convert_pdf(file_id: str):
         base_filename = config_parser.get_base_filename(pdf_path)
         save_output(rendered, out_folder, base_filename)
         
-        # Find the generated markdown file
+        # Find the generated markdown file and images
         output_dir = out_folder
         print(f"🔍 Looking for markdown files in: {output_dir}")
         
         md_files = list(Path(output_dir).glob("*.md"))
+        # Support common image formats
+        image_extensions = ['*.png', '*.jpg', '*.jpeg', '*.tiff', '*.tif', '*.bmp', '*.gif', '*.webp']
+        image_files = []
+        for ext in image_extensions:
+            image_files.extend(list(Path(output_dir).glob(ext)))
+        
         print(f"📝 Markdown files found: {[f.name for f in md_files]}")
+        print(f"🖼️ Image files found: {[f.name for f in image_files]}")
         
         if not md_files:
             all_files = list(Path(output_dir).glob("*"))
@@ -153,8 +167,28 @@ async def convert_pdf(file_id: str):
         with open(md_path, 'r', encoding='utf-8') as f:
             markdown_content = f.read()
         
-        # Clean up markdown - remove page numbers, fix title
-        cleaned_markdown = clean_markdown(markdown_content, file_info['filename'])
+        # Copy images to temporary directory for serving
+        temp_images = []
+        session_image_dir = None
+        if image_files:
+            # Create session-specific directory in temp_images
+            session_id = f"session_{file_id}_{int(time.time())}"
+            session_image_dir = os.path.join("temp_images", session_id)
+            os.makedirs(session_image_dir, exist_ok=True)
+            
+            for image_file in image_files:
+                # Copy image to session directory
+                temp_image_path = os.path.join(session_image_dir, image_file.name)
+                shutil.copy2(image_file, temp_image_path)
+                temp_images.append(f"/temp_images/{session_id}/{image_file.name}")
+                print(f"📸 Copied image to temp: {session_id}/{image_file.name}")
+        
+        # Store session directory for cleanup
+        if session_image_dir:
+            uploaded_files[file_id + '_images'] = session_image_dir
+        
+        # Clean up markdown and fix image references
+        cleaned_markdown = clean_markdown(markdown_content, file_info['filename'], temp_images)
         
         print(f"✅ Conversion complete: {len(cleaned_markdown)} characters")
         
@@ -164,7 +198,9 @@ async def convert_pdf(file_id: str):
         
         return {
             "markdown": cleaned_markdown,
-            "status": "converted"
+            "status": "converted",
+            "images": temp_images,
+            "image_count": len(temp_images)
         }
         
     except subprocess.TimeoutExpired:
@@ -175,16 +211,29 @@ async def convert_pdf(file_id: str):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Conversion failed: {str(e)}")
 
-def clean_markdown(content: str, filename: str) -> str:
-    """Clean up markdown content"""
+def clean_markdown(content: str, filename: str, temp_image_urls: list = None) -> str:
+    """Clean up markdown content and fix image references"""
     lines = content.split('\n')
     cleaned_lines = []
     
     title_set = False
+    temp_image_urls = temp_image_urls or []
+    image_index = 0
     
     for line in lines:
         # Skip page number patterns
         if line.strip().startswith('## Page ') and line.strip().endswith(line.strip().split()[-1].isdigit()):
+            continue
+            
+        # Fix broken image references
+        if line.strip().startswith('![](_page_') or '[Image #' in line:
+            # Replace with actual image if available
+            if image_index < len(temp_image_urls):
+                image_url = temp_image_urls[image_index]
+                cleaned_lines.append(f"![Figure {image_index + 1}]({image_url})")
+                image_index += 1
+            else:
+                cleaned_lines.append("*[Figure/Image available in original PDF]*")
             continue
             
         # Fix title - use first real heading as title, not filename
@@ -209,6 +258,37 @@ def clean_markdown(content: str, filename: str) -> str:
             cleaned_lines.insert(0, f"# {title}\n")
     
     return '\n'.join(cleaned_lines)
+
+def extract_title_from_markdown(markdown: str) -> str:
+    """Extract the H1 title from markdown content"""
+    lines = markdown.split('\n')
+    
+    for line in lines:
+        if line.startswith('# '):
+            return line[2:].strip()
+    
+    return "Academic Paper"
+
+def cleanup_old_temp_images():
+    """Clean up temp images older than 1 hour"""
+    temp_images_dir = Path("temp_images")
+    if not temp_images_dir.exists():
+        return
+    
+    current_time = time.time()
+    for session_dir in temp_images_dir.iterdir():
+        if session_dir.is_dir():
+            # Extract timestamp from directory name
+            try:
+                if session_dir.name.startswith('session_'):
+                    dir_timestamp = int(session_dir.name.split('_')[-1])
+                    # Remove directories older than 1 hour (3600 seconds)
+                    if current_time - dir_timestamp > 3600:
+                        shutil.rmtree(session_dir)
+                        print(f"🧹 Cleaned up old temp images: {session_dir.name}")
+            except (ValueError, IndexError):
+                # Skip directories with unexpected naming
+                pass
 
 @app.post("/api/apply-treatment")
 async def apply_treatment(request: TreatmentRequest):
@@ -270,32 +350,69 @@ async def generate_epub(request: EpubRequest):
     """Generate EPUB from markdown using pandoc"""
     
     try:
-        # Create temporary files
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False, encoding='utf-8') as md_file:
-            md_file.write(request.markdown)
-            md_path = md_file.name
+        # Extract proper title from markdown H1
+        extracted_title = extract_title_from_markdown(request.markdown)
         
-        epub_path = md_path.replace('.md', '.epub')
+        # Use filename as author (remove .pdf extension and clean up)
+        author_from_filename = request.title.replace('.pdf', '').replace('_', ' ').replace('-', ' ')
+        
+        # Create temporary directory for pandoc
+        temp_dir = tempfile.mkdtemp()
+        md_path = os.path.join(temp_dir, 'document.md')
+        epub_path = os.path.join(temp_dir, 'document.epub')
+        
+        # Copy images to temp directory and fix markdown paths
+        markdown_content = request.markdown
+        if '/temp_images/' in markdown_content:
+            images_dir = os.path.join(temp_dir, 'images')
+            os.makedirs(images_dir, exist_ok=True)
+            
+            # Find all image references and copy images
+            import re
+            image_pattern = r'!\[([^\]]*)\]\(/temp_images/([^/]+)/([^)]+)\)'
+            
+            def replace_image_path(match):
+                alt_text = match.group(1)
+                session_id = match.group(2)
+                image_filename = match.group(3)
+                
+                # Copy image from temp_images to temp directory
+                temp_session_path = os.path.join('temp_images', session_id, image_filename)
+                epub_image_path = os.path.join(images_dir, image_filename)
+                
+                if os.path.exists(temp_session_path):
+                    shutil.copy2(temp_session_path, epub_image_path)
+                    print(f"📸 Copied image for EPUB: {image_filename}")
+                    return f'![{alt_text}](images/{image_filename})'
+                else:
+                    print(f"⚠️ Image not found for EPUB: {temp_session_path}")
+                    return match.group(0)  # Return original if image not found
+            
+            markdown_content = re.sub(image_pattern, replace_image_path, markdown_content)
+        
+        # Write markdown to temp file
+        with open(md_path, 'w', encoding='utf-8') as f:
+            f.write(markdown_content)
         
         # Use pandoc to convert markdown to EPUB
         result = subprocess.run([
             'pandoc',
             md_path,
             '-o', epub_path,
-            f'--metadata=title:{request.title}',
-            '--metadata=author:Academic Paper',
+            f'--metadata=title:{extracted_title}',
+            f'--metadata=author:{author_from_filename}',
             '--metadata=language:en',
             '--toc',  # Add table of contents
             '--toc-depth=3'
-        ], capture_output=True, text=True)
+        ], capture_output=True, text=True, cwd=temp_dir)
         
         if result.returncode != 0:
             print(f"❌ Pandoc failed: {result.stderr}")
-            os.unlink(md_path)
+            shutil.rmtree(temp_dir)
             raise HTTPException(status_code=500, detail=f"EPUB generation failed: {result.stderr}")
         
         if not os.path.exists(epub_path):
-            os.unlink(md_path)
+            shutil.rmtree(temp_dir)
             raise HTTPException(status_code=500, detail="EPUB file was not created")
         
         print(f"✅ EPUB generated: {epub_path}")
@@ -304,13 +421,13 @@ async def generate_epub(request: EpubRequest):
         return FileResponse(
             epub_path,
             media_type="application/epub+zip",
-            filename=f"{request.title}.epub",
-            background=lambda: [os.unlink(md_path), os.unlink(epub_path)]
+            filename=f"{extracted_title}.epub",
+            background=lambda: shutil.rmtree(temp_dir)
         )
         
     except Exception as e:
-        if 'md_path' in locals() and os.path.exists(md_path):
-            os.unlink(md_path)
+        if 'temp_dir' in locals() and os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
         raise HTTPException(status_code=500, detail=f"EPUB generation failed: {str(e)}")
 
 def markdown_to_html(markdown: str) -> str:
