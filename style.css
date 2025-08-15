@@ -109,6 +109,12 @@ main {
     display: none;
 }
 
+/* Center the convert button */
+#convert-btn {
+    display: block;
+    margin: 1.5rem auto;
+}
+
 /* Editor */
 .editor-controls {
     display: flex;
