@@ -101,23 +101,35 @@ async def convert_pdf(file_id: str):
         print(f"🔄 Converting {file_info['filename']} using marker_single...")
         
         # Use marker_single command line tool for better results
+        # Force CPU usage to avoid GPU tensor bug (issue #827)
+        env = os.environ.copy()
+        env['TORCH_DEVICE'] = 'cpu'
+        
         result = subprocess.run([
             'marker_single', 
             pdf_path,
-            '--output_dir', os.path.dirname(pdf_path),
-            '--batch_multiplier', '1'
-        ], capture_output=True, text=True, timeout=300)
+            '--output_dir', os.path.dirname(pdf_path)
+        ], capture_output=True, text=True, timeout=300, env=env)
         
         if result.returncode != 0:
-            print(f"❌ marker_single failed: {result.stderr}")
+            print(f"❌ marker_single failed with return code: {result.returncode}")
+            print(f"STDOUT: {result.stdout}")
+            print(f"STDERR: {result.stderr}")
             raise HTTPException(status_code=500, detail=f"Conversion failed: {result.stderr}")
         
         # Find the generated markdown file
         output_dir = os.path.dirname(pdf_path)
+        print(f"🔍 Looking for markdown files in: {output_dir}")
+        
+        # List all files in output directory for debugging
+        all_files = list(Path(output_dir).glob("*"))
+        print(f"📁 Files in output directory: {[f.name for f in all_files]}")
+        
         md_files = list(Path(output_dir).glob("*.md"))
+        print(f"📝 Markdown files found: {[f.name for f in md_files]}")
         
         if not md_files:
-            raise HTTPException(status_code=500, detail="No markdown file generated")
+            raise HTTPException(status_code=500, detail=f"No markdown file generated. Files in directory: {[f.name for f in all_files]}")
         
         md_path = md_files[0]
         
@@ -142,6 +154,8 @@ async def convert_pdf(file_id: str):
         raise HTTPException(status_code=500, detail="Conversion timed out (5 minutes)")
     except Exception as e:
         print(f"❌ Conversion error: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Conversion failed: {str(e)}")
 
 def clean_markdown(content: str, filename: str) -> str:
