@@ -1,5 +1,6 @@
 // Global state
 let currentFile = null;
+let fileId = null;
 let markdownContent = '';
 let epubBlob = null;
 
@@ -29,7 +30,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
 function setupEventListeners() {
     // File upload events
-    uploadArea.addEventListener('click', () => pdfInput.click());
+    uploadArea.addEventListener('click', (e) => {
+        // Only trigger if clicking the area itself, not the button
+        if (e.target === uploadArea || e.target.closest('.upload-icon') || e.target.tagName === 'P') {
+            pdfInput.click();
+        }
+    });
     uploadArea.addEventListener('dragover', handleDragOver);
     uploadArea.addEventListener('drop', handleDrop);
     uploadArea.addEventListener('dragleave', handleDragLeave);
@@ -74,17 +80,46 @@ function handleFileSelect(e) {
     }
 }
 
-function handleFile(file) {
+async function handleFile(file) {
     currentFile = file;
     
-    // Show file info
-    fileInfo.innerHTML = `
-        <h4>📄 ${file.name}</h4>
-        <p>Size: ${formatFileSize(file.size)}</p>
-        <p>Last modified: ${new Date(file.lastModified).toLocaleDateString()}</p>
-    `;
-    fileInfo.classList.remove('hidden');
-    convertBtn.classList.remove('hidden');
+    // Show uploading status
+    showLoading('📤 Uploading PDF...');
+    
+    try {
+        // Step 1: Upload the file
+        const formData = new FormData();
+        formData.append('pdf', file);
+        
+        const response = await fetch('/api/upload-pdf', {
+            method: 'POST',
+            body: formData
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Upload failed: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        fileId = result.file_id;
+        
+        // Show file info
+        fileInfo.innerHTML = `
+            <h4>📄 ${result.filename}</h4>
+            <p>Size: ${formatFileSize(result.size)}</p>
+            <p>Status: ✅ Uploaded successfully</p>
+            <p>File ID: ${fileId}</p>
+        `;
+        fileInfo.classList.remove('hidden');
+        convertBtn.classList.remove('hidden');
+        
+        hideLoading();
+        
+    } catch (error) {
+        hideLoading();
+        alert('Error uploading PDF: ' + error.message);
+        console.error('Upload error:', error);
+    }
 }
 
 function formatFileSize(bytes) {
@@ -97,34 +132,50 @@ function formatFileSize(bytes) {
 
 // PDF to Markdown conversion
 async function convertToMarkdown() {
-    if (!currentFile) return;
+    if (!fileId) {
+        alert('Please upload a PDF file first.');
+        return;
+    }
     
-    showLoading('Converting PDF to Markdown...');
+    // Show detailed progress
+    showLoading('🔄 Starting PDF conversion with marker_single...');
     
     try {
-        const formData = new FormData();
-        formData.append('pdf', currentFile);
+        // Update progress message
+        setTimeout(() => updateLoadingText('📖 Analyzing PDF layout...'), 2000);
+        setTimeout(() => updateLoadingText('🔍 Running OCR and text recognition...'), 10000);
+        setTimeout(() => updateLoadingText('📝 Converting to markdown format...'), 30000);
         
-        const response = await fetch('/api/convert-to-markdown', {
-            method: 'POST',
-            body: formData
+        const response = await fetch(`/api/convert/${fileId}`, {
+            method: 'POST'
         });
         
         if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            const errorData = await response.json();
+            throw new Error(errorData.detail || `Conversion failed: ${response.status}`);
         }
         
         const result = await response.json();
         markdownContent = result.markdown;
         markdownEditor.value = markdownContent;
         
-        hideLoading();
-        showStep('edit');
+        updateLoadingText('✅ Conversion complete!');
+        setTimeout(() => {
+            hideLoading();
+            showStep('edit');
+        }, 500);
         
     } catch (error) {
         hideLoading();
         alert('Error converting PDF: ' + error.message);
         console.error('Conversion error:', error);
+    }
+}
+
+function updateLoadingText(message) {
+    const loadingText = document.getElementById('loading-text');
+    if (loadingText) {
+        loadingText.textContent = message;
     }
 }
 
@@ -244,6 +295,7 @@ function downloadEpub() {
 // Restart process
 function restartProcess() {
     currentFile = null;
+    fileId = null;
     markdownContent = '';
     epubBlob = null;
     markdownEditor.value = '';
