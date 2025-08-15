@@ -19,6 +19,16 @@ except ImportError:
     AI_AVAILABLE = False
     print("Info: OpenAI not installed. AI treatment will use basic text processing.")
 
+# For PDF to markdown conversion
+try:
+    from marker.models import create_model_dict
+    from marker.config.parser import ConfigParser
+    from marker.output import save_output
+    MARKER_AVAILABLE = True
+except ImportError:
+    MARKER_AVAILABLE = False
+    print("Info: Marker not installed. PDF conversion will not work.")
+
 app = FastAPI(title="KindleMyPaper v2", description="Convert Academic Papers to Kindle Format - Two-Step Process")
 
 # Enable CORS for development
@@ -98,37 +108,44 @@ async def convert_pdf(file_id: str):
         raise HTTPException(status_code=404, detail="PDF file no longer exists")
     
     try:
-        print(f"🔄 Converting {file_info['filename']} using marker_single...")
+        print(f"🔄 Converting {file_info['filename']} using marker...")
         
-        # Use marker_single command line tool for better results
-        # Force CPU usage to avoid GPU tensor bug (issue #827)
-        env = os.environ.copy()
-        env['TORCH_DEVICE'] = 'cpu'
+        if not MARKER_AVAILABLE:
+            raise HTTPException(status_code=500, detail="Marker not installed")
         
-        result = subprocess.run([
-            'marker_single', 
-            pdf_path,
-            '--output_dir', os.path.dirname(pdf_path)
-        ], capture_output=True, text=True, timeout=300, env=env)
+        # Use marker directly in Python
+        models = create_model_dict()
+        config_parser = ConfigParser({
+            'output_dir': os.path.dirname(pdf_path),
+            'output_format': 'markdown',
+            'debug': False,
+            'converter_cls': 'marker.converters.pdf.PdfConverter'
+        })
         
-        if result.returncode != 0:
-            print(f"❌ marker_single failed with return code: {result.returncode}")
-            print(f"STDOUT: {result.stdout}")
-            print(f"STDERR: {result.stderr}")
-            raise HTTPException(status_code=500, detail=f"Conversion failed: {result.stderr}")
+        converter_cls = config_parser.get_converter_cls()
+        converter = converter_cls(
+            config=config_parser.generate_config_dict(),
+            artifact_dict=models,
+            processor_list=config_parser.get_processors(),
+            renderer=config_parser.get_renderer(),
+            llm_service=config_parser.get_llm_service(),
+        )
+        
+        # Convert the PDF
+        rendered = converter(pdf_path)
+        out_folder = config_parser.get_output_folder(pdf_path)
+        base_filename = config_parser.get_base_filename(pdf_path)
+        save_output(rendered, out_folder, base_filename)
         
         # Find the generated markdown file
-        output_dir = os.path.dirname(pdf_path)
+        output_dir = out_folder
         print(f"🔍 Looking for markdown files in: {output_dir}")
-        
-        # List all files in output directory for debugging
-        all_files = list(Path(output_dir).glob("*"))
-        print(f"📁 Files in output directory: {[f.name for f in all_files]}")
         
         md_files = list(Path(output_dir).glob("*.md"))
         print(f"📝 Markdown files found: {[f.name for f in md_files]}")
         
         if not md_files:
+            all_files = list(Path(output_dir).glob("*"))
             raise HTTPException(status_code=500, detail=f"No markdown file generated. Files in directory: {[f.name for f in all_files]}")
         
         md_path = md_files[0]
