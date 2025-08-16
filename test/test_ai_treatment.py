@@ -433,7 +433,7 @@ This is a test document to verify that Gemini preserves content length properly.
 ## Content
 Here is some content that should be preserved in its entirety without summarization or truncation."""
     
-    result = await apply_direct_gemini_treatment(
+    result = await apply_google_gemini_treatment(
         test_content,
         "Fix any minor errors but preserve all content",
         "gemini-2.5-pro",
