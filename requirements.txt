@@ -10,3 +10,4 @@ torch
 transformers
 pillow
 pypdfium2
+streamlit
