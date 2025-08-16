@@ -12,7 +12,6 @@ const fileInfo = document.getElementById('file-info');
 const convertBtn = document.getElementById('convert-btn');
 const markdownEditor = document.getElementById('markdown-editor');
 const applyPromptBtn = document.getElementById('apply-prompt-btn');
-const previewBtn = document.getElementById('preview-btn');
 const generateEpubBtn = document.getElementById('generate-epub-btn');
 const downloadBtn = document.getElementById('download-btn');
 const restartBtn = document.getElementById('restart-btn');
@@ -113,7 +112,6 @@ function setupEventListeners() {
     } else {
         console.error('❌ Apply prompt button not found');
     }
-    previewBtn.addEventListener('click', previewMarkdown);
     generateEpubBtn.addEventListener('click', generateEpub);
     downloadBtn.addEventListener('click', downloadEpub);
     restartBtn.addEventListener('click', restartProcess);
@@ -381,29 +379,6 @@ Remember: This is copy-editing, not rewriting. Preserve all academic content exa
     }
 }
 
-// Preview markdown
-function previewMarkdown() {
-    const previewWindow = window.open('', '_blank');
-    const markdownHtml = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Markdown Preview</title>
-            <style>
-                body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; line-height: 1.6; max-width: 800px; margin: 0 auto; padding: 20px; }
-                pre { background: #f4f4f4; padding: 10px; border-radius: 4px; overflow-x: auto; }
-                code { background: #f4f4f4; padding: 2px 4px; border-radius: 2px; }
-                blockquote { border-left: 4px solid #ddd; margin: 0; padding-left: 20px; color: #666; }
-            </style>
-        </head>
-        <body>
-            <pre>${markdownEditor.value}</pre>
-        </body>
-        </html>
-    `;
-    previewWindow.document.write(markdownHtml);
-    previewWindow.document.close();
-}
 
 // Generate EPUB
 async function generateEpub() {

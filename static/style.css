@@ -236,11 +236,20 @@ main {
     font-style: italic;
 }
 
-.control-buttons {
+.prompt-input-row {
     display: flex;
     gap: 1rem;
-    margin-top: 1rem;
-    flex-wrap: wrap;
+    align-items: flex-start;
+}
+
+.prompt-input-row textarea {
+    flex: 1;
+    min-width: 0;
+}
+
+.prompt-input-row button {
+    flex-shrink: 0;
+    align-self: flex-end;
 }
 
 .editor-container {
@@ -318,6 +327,25 @@ main {
 
 .btn-success:hover {
     background: #38a169;
+}
+
+.btn-gemini {
+    background: linear-gradient(135deg, #4285f4 0%, #34a853 50%, #ea4335 100%);
+    color: white;
+    border: none;
+    font-weight: 600;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    transition: all 0.2s ease;
+}
+
+.btn-gemini:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    background: linear-gradient(135deg, #3367d6 0%, #2d8a47 50%, #d33b2c 100%);
+}
+
+.btn-gemini:active {
+    transform: translateY(0);
 }
 
 .btn.hidden {
