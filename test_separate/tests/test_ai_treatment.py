@@ -11,11 +11,11 @@ import tempfile
 import shutil
 
 # Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from app import (
-    apply_openai_treatment,
-    apply_direct_gemini_treatment,
+    apply_gemini_treatment,
+    apply_google_gemini_treatment,
     clean_gemini_response,
     enhanced_markdown_treatment,
     clean_markdown,
@@ -192,15 +192,21 @@ class TestGeminiIntegration:
     @pytest.mark.asyncio
     async def test_gemini_successful_response(self, mock_gemini_response):
         """Test successful Gemini API call"""
-        with patch('aiohttp.ClientSession.post') as mock_post:
-            # Setup mock response
-            mock_response = AsyncMock()
-            mock_response.status = 200
-            mock_response.json = AsyncMock(return_value=mock_gemini_response)
-            mock_post.return_value.__aenter__.return_value = mock_response
+        with patch('google.genai.Client') as mock_client_class:
+            # Setup mock client and streaming response
+            mock_client = Mock()
+            mock_client_class.return_value = mock_client
+            
+            # Mock streaming chunks
+            mock_chunk1 = Mock()
+            mock_chunk1.text = "# Corrected Document\n"
+            mock_chunk2 = Mock()
+            mock_chunk2.text = "This is the corrected content."
+            
+            mock_client.models.generate_content_stream.return_value = [mock_chunk1, mock_chunk2]
             
             # Test the function
-            result = await apply_direct_gemini_treatment(
+            result = await apply_google_gemini_treatment(
                 "# Test Document\nContent here",
                 "Fix errors",
                 "gemini-2.5-pro",
@@ -213,23 +219,24 @@ class TestGeminiIntegration:
     @pytest.mark.asyncio
     async def test_gemini_error_handling(self, mock_error_response):
         """Test Gemini API error handling"""
-        with patch('aiohttp.ClientSession.post') as mock_post:
-            # Setup mock error response
-            mock_response = AsyncMock()
-            mock_response.status = 400
-            mock_response.json = AsyncMock(return_value=mock_error_response)
-            mock_post.return_value.__aenter__.return_value = mock_response
+        with patch('google.genai.Client') as mock_client_class:
+            # Setup mock client that raises an exception
+            mock_client = Mock()
+            mock_client_class.return_value = mock_client
+            
+            # Mock streaming that raises an exception
+            mock_client.models.generate_content_stream.side_effect = Exception("API key not valid")
             
             # Test that exception is raised
             with pytest.raises(Exception) as exc_info:
-                await apply_direct_gemini_treatment(
+                await apply_google_gemini_treatment(
                     "# Test Document\nContent here",
                     "Fix errors",
                     "gemini-2.5-pro",
                     "test-api-key"
                 )
             
-            assert "Gemini API error 400" in str(exc_info.value)
+            assert "Gemini API error" in str(exc_info.value)
 
 class TestMarkdownProcessing:
     """Test markdown processing utilities"""
