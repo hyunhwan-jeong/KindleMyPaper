@@ -153,9 +153,94 @@ main {
 
 /* Editor */
 .editor-controls {
+    margin-bottom: 1rem;
+}
+
+/* AI Controls */
+.ai-controls {
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    margin-bottom: 1rem;
+    overflow: hidden;
+}
+
+.ai-header {
+    background: #e9ecef;
+    margin: 0;
+}
+
+.toggle-btn {
+    width: 100%;
+    background: none;
+    border: none;
+    padding: 0.75rem 1rem;
+    text-align: left;
+    cursor: pointer;
+    font-weight: 500;
+    color: #495057;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: background-color 0.2s ease;
+}
+
+.toggle-btn:hover {
+    background: #dee2e6;
+}
+
+.toggle-btn:focus {
+    outline: none;
+    background: #dee2e6;
+}
+
+#toggle-icon {
+    transition: transform 0.2s ease;
+    font-size: 0.8rem;
+}
+
+.prompt-container {
+    padding: 1rem;
+    transition: all 0.3s ease;
+    max-height: 200px;
+    overflow: hidden;
+}
+
+.prompt-container.collapsed {
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    overflow: hidden;
+}
+
+#custom-prompt {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 0.9rem;
+    line-height: 1.4;
+    resize: vertical;
+    transition: border-color 0.2s ease;
+}
+
+#custom-prompt:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1);
+}
+
+#custom-prompt::placeholder {
+    color: #6c757d;
+    font-style: italic;
+}
+
+.control-buttons {
     display: flex;
     gap: 1rem;
-    margin-bottom: 1rem;
+    margin-top: 1rem;
+    flex-wrap: wrap;
 }
 
 .editor-container {

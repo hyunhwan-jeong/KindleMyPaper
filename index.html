@@ -37,8 +37,20 @@
                     <div id="images-container" class="images-container"></div>
                 </div>
                 <div class="editor-controls">
-                    <button id="apply-prompt-btn" class="btn btn-secondary">Apply Custom Treatment</button>
-                    <button id="preview-btn" class="btn btn-secondary">Preview</button>
+                    <div class="ai-controls">
+                        <div class="ai-header">
+                            <button id="toggle-prompt-btn" class="toggle-btn">
+                                🤖 AI Enhancement Settings <span id="toggle-icon">▶</span>
+                            </button>
+                        </div>
+                        <div class="prompt-container collapsed" id="prompt-container">
+                            <textarea id="custom-prompt" placeholder="Enter custom instructions for AI processing (optional)..." rows="3"></textarea>
+                        </div>
+                    </div>
+                    <div class="control-buttons">
+                        <button id="apply-prompt-btn" class="btn btn-secondary">Apply AI Treatment</button>
+                        <button id="preview-btn" class="btn btn-secondary">Preview</button>
+                    </div>
                 </div>
                 <div class="editor-container">
                     <textarea id="markdown-editor" placeholder="Converted markdown will appear here..."></textarea>
