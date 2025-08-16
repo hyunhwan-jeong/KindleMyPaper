@@ -12,13 +12,21 @@ import json
 import time
 from typing import Optional
 
-# For AI treatment (optional)
+# Load environment variables from .env file
+from dotenv import load_dotenv
+load_dotenv()
+
+# For Google Gemini integration
 try:
-    import openai
-    AI_AVAILABLE = True
+    import google.genai as genai
+    from google.genai import types
+    GENAI_AVAILABLE = True
+    print("✅ Google GenAI library loaded successfully")
 except ImportError:
-    AI_AVAILABLE = False
-    print("Info: OpenAI not installed. AI treatment will use basic text processing.")
+    GENAI_AVAILABLE = False
+    print("Info: Google GenAI not installed.")
+
+AI_AVAILABLE = GENAI_AVAILABLE
 
 # For PDF to markdown conversion
 try:
@@ -51,10 +59,13 @@ app.mount("/temp_images", StaticFiles(directory="temp_images"), name="temp_image
 class TreatmentRequest(BaseModel):
     markdown: str
     prompt: str
+    use_llm: bool = True
 
 class EpubRequest(BaseModel):
     markdown: str
     title: str
+    use_llm: bool = False
+    auto_enhance: bool = False
 
 # Global storage for uploaded files
 uploaded_files = {}
@@ -294,27 +305,227 @@ def cleanup_old_temp_images():
 async def apply_treatment(request: TreatmentRequest):
     """Apply custom treatment to markdown using AI or basic processing"""
     
-    if AI_AVAILABLE and os.getenv("OPENAI_API_KEY"):
+    if request.use_llm and GENAI_AVAILABLE and os.getenv("GEMINI_API_KEY"):
         try:
-            # Use OpenAI for treatment
-            client = openai.OpenAI()
-            response = client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": "You are a helpful assistant that improves academic paper markdown formatting."},
-                    {"role": "user", "content": f"Please apply this treatment: {request.prompt}\n\nTo this markdown:\n{request.markdown}"}
-                ],
-                max_tokens=4000
-            )
-            treated_markdown = response.choices[0].message.content
+            treated_markdown = await apply_gemini_treatment(request.markdown, request.prompt)
         except Exception as e:
-            # Fallback to basic processing
-            treated_markdown = basic_markdown_treatment(request.markdown, request.prompt)
+            print(f"❌ Gemini treatment failed: {str(e)}")
+            # Fallback to enhanced basic processing
+            treated_markdown = enhanced_markdown_treatment(request.markdown, request.prompt)
     else:
-        # Use basic processing
-        treated_markdown = basic_markdown_treatment(request.markdown, request.prompt)
+        # Use enhanced basic processing
+        treated_markdown = enhanced_markdown_treatment(request.markdown, request.prompt)
     
     return {"treated_markdown": treated_markdown}
+
+async def apply_gemini_treatment(markdown: str, prompt: str) -> str:
+    """Apply treatment using Google Gemini API"""
+    gemini_api_key = os.getenv("GEMINI_API_KEY", "")
+    
+    if not gemini_api_key:
+        raise Exception("GEMINI_API_KEY not found in environment")
+    
+    if not GENAI_AVAILABLE:
+        raise Exception("Google GenAI library not available")
+    
+    model = os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
+    print(f"🔧 Using Google Gemini API with model: {model}")
+    
+    return await apply_google_gemini_treatment(markdown, prompt, model, gemini_api_key)
+
+async def apply_google_gemini_treatment(markdown: str, prompt: str, model: str, api_key: str) -> str:
+    """Apply treatment using Google GenAI library with streaming"""
+    if not GENAI_AVAILABLE:
+        raise Exception("Google GenAI library not available")
+    
+    # Configure the client
+    client = genai.Client(api_key=api_key)
+    
+    system_prompt = """You are a document correction specialist. Your ONLY job is to fix OCR errors and formatting issues while preserving EVERY SINGLE WORD of the original content.
+
+STRICT RULES:
+1. DO NOT SUMMARIZE, SHORTEN, OR CONDENSE ANYTHING
+2. DO NOT REMOVE ANY SENTENCES OR PARAGRAPHS
+3. DO NOT PARAPHRASE OR REWRITE CONTENT
+4. PRESERVE EXACT CONTENT LENGTH - output should be similar length to input
+5. ONLY fix obvious OCR mistakes like "rn" → "m", "cl" → "d", character recognition errors
+6. ONLY improve markdown formatting (headers, lists, etc.)
+7. RETURN THE COMPLETE DOCUMENT FROM START TO FINISH
+8. Include ALL sections, ALL paragraphs, ALL details
+
+Think of this as a copy-editing task, not a rewriting task. The content is already good - you're just fixing technical errors from PDF extraction."""
+    
+    # Enhanced prompt structure with explicit length preservation
+    full_prompt = f"""{system_prompt}
+
+TASK: The user wants you to process this markdown document. Fix OCR errors and improve formatting, but preserve EVERY WORD and maintain the same content length.
+
+USER INSTRUCTIONS: {prompt}
+
+IMPORTANT: The original document has {len(markdown)} characters. Your corrected version should be approximately the same length. DO NOT SUMMARIZE.
+
+DOCUMENT TO PROCESS:
+{markdown}
+
+REMINDER: Return the COMPLETE corrected document. Do not add explanations or wrap in code blocks."""
+
+    # Create content and generation config
+    contents = [types.Content(parts=[types.Part(text=full_prompt)])]
+    
+    generate_content_config = types.GenerateContentConfig(
+        thinking_config=types.ThinkingConfig(
+            thinking_budget=-1,
+        ),
+    )
+    
+    print(f"📊 Original content length: {len(markdown)} characters")
+    print(f"🔧 Processing with {model}...")
+    
+    try:
+        # Use streaming generation to collect the full response
+        result_chunks = []
+        for chunk in client.models.generate_content_stream(
+            model=model,
+            contents=contents,
+            config=generate_content_config,
+        ):
+            if chunk.text:
+                result_chunks.append(chunk.text)
+        
+        # Combine all chunks
+        raw_result = ''.join(result_chunks)
+        
+        print(f"📊 Content Length Analysis:")
+        print(f"   Original: {len(markdown)} characters")
+        print(f"   Raw response: {len(raw_result)} characters") 
+        print(f"   Retention rate: {len(raw_result)/len(markdown)*100:.1f}%")
+        
+        # Check if content was significantly reduced
+        if len(raw_result) < len(markdown) * 0.7:
+            print(f"⚠️  WARNING: Significant content reduction detected!")
+            print(f"   Expected similar length, got {len(raw_result)/len(markdown)*100:.1f}% of original")
+        
+        # Clean up any markdown code blocks that Gemini might add
+        result = clean_gemini_response(raw_result)
+        print(f"🧹 Cleaned response length: {len(result)} chars")
+        print(f"🎯 Final retention rate: {len(result)/len(markdown)*100:.1f}%")
+        
+        print(f"✅ Gemini {model} processing successful")
+        return result
+        
+    except Exception as e:
+        print(f"❌ Gemini processing failed: {e}")
+        raise Exception(f"Gemini API error: {e}")
+
+def clean_gemini_response(text: str) -> str:
+    """Clean up Gemini response by removing code blocks and explanations"""
+    import re
+    
+    # Remove markdown code blocks (```markdown ... ```)
+    text = re.sub(r'^```\w*\n', '', text, flags=re.MULTILINE)
+    text = re.sub(r'\n```$', '', text, flags=re.MULTILINE)
+    text = re.sub(r'^```$', '', text, flags=re.MULTILINE)
+    
+    # Remove any leading/trailing whitespace
+    text = text.strip()
+    
+    # Only remove explanations if there are clear explanation markers
+    # Be much more conservative about what we consider "explanations"
+    
+    # Remove sections that clearly start with explanation headers
+    text = re.sub(r'\n### Explanation[^\n]*\n.*$', '', text, flags=re.DOTALL)
+    text = re.sub(r'\n## Explanation[^\n]*\n.*$', '', text, flags=re.DOTALL)
+    text = re.sub(r'\n### Summary[^\n]*\n.*$', '', text, flags=re.DOTALL)
+    text = re.sub(r'\n## Summary[^\n]*\n.*$', '', text, flags=re.DOTALL)
+    
+    # Only split on "---" if what comes after looks like explanations
+    if '---' in text:
+        parts = text.split('---', 1)  # Split only on first occurrence
+        first_part = parts[0].strip()
+        if len(parts) > 1:
+            second_part = parts[1].strip().lower()
+            # Only keep first part if second part starts with explanation keywords
+            if (second_part.startswith('explanation') or 
+                second_part.startswith('summary') or 
+                second_part.startswith('note') or
+                second_part.startswith('the above')):
+                text = first_part
+    
+    return text.strip()
+
+
+def enhanced_markdown_treatment(markdown: str, prompt: str) -> str:
+    """Enhanced basic markdown treatment with intelligent processing"""
+    lines = markdown.split('\n')
+    treated_lines = []
+    
+    # Track document structure
+    in_code_block = False
+    in_table = False
+    prev_line_empty = True
+    
+    for i, line in enumerate(lines):
+        original_line = line
+        line = line.strip()
+        
+        # Handle code blocks
+        if line.startswith('```'):
+            in_code_block = not in_code_block
+            treated_lines.append(original_line)
+            continue
+            
+        if in_code_block:
+            treated_lines.append(original_line)
+            continue
+        
+        # Handle tables
+        if '|' in line and not in_table:
+            in_table = True
+        elif in_table and not ('|' in line or line == ''):
+            in_table = False
+            
+        # Enhanced OCR error correction
+        if line:
+            # Fix common OCR ligature issues
+            line = line.replace('fi', 'fi').replace('fl', 'fl').replace('ff', 'ff')
+            # Fix common character recognition errors
+            line = line.replace('rn', 'm').replace('cl', 'd').replace('0', 'o') if line.count('0') > line.count('o') * 2 else line
+            # Fix spacing issues
+            line = ' '.join(line.split())
+            
+            # Intelligent header detection
+            if not line.startswith('#') and len(line) < 100:
+                # Check if line might be a header (all caps, title case, etc.)
+                if (line.isupper() and len(line.split()) <= 8) or \
+                   (line.istitle() and prev_line_empty and (i == 0 or not lines[i-1].strip())):
+                    # Determine header level based on context
+                    if i < len(lines) * 0.1:  # Early in document
+                        line = f"## {line}"
+                    else:
+                        line = f"### {line}"
+            
+            # Improve paragraph spacing
+            if not line.startswith('#') and not line.startswith('-') and not line.startswith('*') and not in_table:
+                if len(line) > 50:  # Likely a paragraph
+                    treated_lines.append(line)
+                    if i < len(lines) - 1 and lines[i + 1].strip():  # Next line exists and not empty
+                        treated_lines.append('')  # Add paragraph spacing
+                else:
+                    treated_lines.append(line)
+            else:
+                treated_lines.append(line)
+        else:
+            treated_lines.append('')
+            
+        prev_line_empty = not bool(line)
+    
+    # Post-processing cleanup
+    result = '\n'.join(treated_lines)
+    
+    # Remove excessive blank lines
+    result = '\n'.join(line for line in result.split('\n') if line.strip() or result.split('\n').index(line) == 0 or result.split('\n')[result.split('\n').index(line) - 1].strip())
+    
+    return result
 
 def basic_markdown_treatment(markdown: str, prompt: str) -> str:
     """Basic markdown treatment without AI"""
@@ -493,7 +704,8 @@ async def health_check():
         "status": "healthy",
         "marker_available": marker_available,
         "pandoc_available": pandoc_available,
-        "ai_available": AI_AVAILABLE and bool(os.getenv("OPENAI_API_KEY")),
+        "ai_available": GENAI_AVAILABLE and bool(os.getenv("GEMINI_API_KEY")),
+        "gemini_available": GENAI_AVAILABLE,
         "version": "2.0"
     }
 
