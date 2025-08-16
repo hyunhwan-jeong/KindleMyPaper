@@ -247,6 +247,12 @@ main {
     overflow: hidden;
 }
 
+.editor-footer {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 1rem;
+}
+
 #markdown-editor {
     width: 100%;
     height: 400px;
