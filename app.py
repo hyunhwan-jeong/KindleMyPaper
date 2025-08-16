@@ -431,12 +431,17 @@ async def generate_epub(request: EpubRequest):
         
         print(f"✅ EPUB generated: {epub_path}")
         
+        # Define cleanup function
+        def cleanup_temp_dir():
+            if os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir)
+        
         # Return the EPUB file
         return FileResponse(
             epub_path,
             media_type="application/epub+zip",
             filename=f"{extracted_title}.epub",
-            background=lambda: shutil.rmtree(temp_dir)
+            background=cleanup_temp_dir
         )
         
     except Exception as e:
