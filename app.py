@@ -30,7 +30,7 @@ AI_AVAILABLE = GENAI_AVAILABLE
 
 # For PDF to markdown conversion
 try:
-    from marker.models import create_model_dict
+    from marker.models import create_model_dict, TableRecPredictor
     from marker.config.parser import ConfigParser
     from marker.output import save_output
     MARKER_AVAILABLE = True
@@ -132,7 +132,9 @@ async def convert_pdf(file_id: str):
             raise HTTPException(status_code=500, detail="Marker not installed")
         
         # Use marker directly in Python
+        print("🔧 Initializing models...")
         models = create_model_dict()
+        
         config_parser = ConfigParser({
             'output_dir': os.path.dirname(pdf_path),
             'output_format': 'markdown',
@@ -140,11 +142,23 @@ async def convert_pdf(file_id: str):
             'converter_cls': 'marker.converters.pdf.PdfConverter'
         })
         
+        # Get original processors and filter out table processor to avoid tensor stack error
+        original_processors = config_parser.get_processors() or []
+        filtered_processors = []
+        
+        for processor in original_processors:
+            processor_name = processor.__class__.__name__
+            if 'table' not in processor_name.lower():
+                filtered_processors.append(processor)
+                print(f"✅ Including processor: {processor_name}")
+            else:
+                print(f"⚠️ Skipping table processor: {processor_name} to avoid tensor stack error")
+        
         converter_cls = config_parser.get_converter_cls()
         converter = converter_cls(
             config=config_parser.generate_config_dict(),
             artifact_dict=models,
-            processor_list=config_parser.get_processors(),
+            processor_list=filtered_processors,
             renderer=config_parser.get_renderer(),
             llm_service=config_parser.get_llm_service(),
         )
@@ -628,12 +642,17 @@ async def generate_epub(request: EpubRequest):
         
         print(f"✅ EPUB generated: {epub_path}")
         
+        # Define cleanup function
+        def cleanup_temp_dir():
+            if os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir)
+        
         # Return the EPUB file
         return FileResponse(
             epub_path,
             media_type="application/epub+zip",
             filename=f"{extracted_title}.epub",
-            background=lambda: shutil.rmtree(temp_dir)
+            background=cleanup_temp_dir
         )
         
     except Exception as e:
